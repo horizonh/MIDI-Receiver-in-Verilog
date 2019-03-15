@@ -1,0 +1,98 @@
+module test (CLK, DATA, RESET, LED);
+	input wire CLK, DATA, RESET;
+	output LED;
+	wire[7:0] LED;
+        wire RECORD;
+	wire[3:0] BIT;
+	wire[2:0] BYTE;
+        wire ON;
+	wire[7:0] NOTE;
+	reg[0:7] NOTE_reg;
+	assign NOTE = NOTE_reg;
+	reg [2:0] cnt;
+
+	counter c (CLK, RESET, RECORD, BIT, BYTE, DATA);
+
+	always @(posedge CLK) begin
+	   if(!RESET)
+           begin
+		NOTE_reg <= 8'b0;
+		cnt <= 0;
+	   end
+	   else if (RECORD) begin
+		NOTE_reg[cnt] = DATA;
+		if(cnt < 7)
+		begin
+		   cnt <= cnt+1;
+		end
+		else
+		begin
+		   cnt <= 0;
+		end
+	    end
+	end
+
+	assign ON = ((BYTE==3'd2 && (BIT<3'd9))||(BYTE==3'd3)||(BYTE==3'd4));
+	assign LED = NOTE & {ON, ON, ON, ON, ON, ON, ON, ON};
+	
+endmodule
+
+
+module counter (CLK, RESET, RECORD, BIT, BYTE, DATA);
+	input wire CLK, RESET, DATA;
+	output reg RECORD;
+	output reg[3:0] BIT;
+	output reg[2:0] BYTE;
+	reg[6:0] tcnt;
+	reg[1:0] EN_ff;
+	reg[1:0] DISABLE_ff;
+	reg[1:0] data_ff;
+	reg EN;
+
+	always @(posedge CLK) begin
+	   if(!RESET) begin
+		data_ff <= 2'b0;
+		DISABLE_ff <= 2'b0;
+		EN <= 0;
+	    end
+	    else begin
+		DISABLE_ff[0] <= (BIT == 4'd9);
+		DISABLE_ff[1] <= DISABLE_ff[0];
+		data_ff[0] <= DATA;      //ff for detecting change in data
+        data_ff[1] <= data_ff[0];
+		if(DISABLE_ff[0] && !DISABLE_ff[1]) EN <= 0;
+		else if ((!data_ff[0] && data_ff[1])) EN <= 1;
+	     end
+	end
+
+	always @(posedge CLK) begin
+	     EN_ff[0] <= EN;
+	     EN_ff[1] <= EN_ff[0];
+
+	     if(!RESET) begin
+		tcnt <= 7'b0;
+		BIT <= 4'b0;
+		BYTE <= 3'b0;
+	     end
+	     else if (EN) begin
+		tcnt <= tcnt + 7'd1;
+		if(tcnt==7'd64 && (BIT != 4'b0)&&(BYTE==3'd1))
+		   RECORD <=1; //RECORD ON for the first 8 valid bits
+		else
+		   RECORD <= 0;
+		
+		if(!EN_ff[1]) BIT <= 4'b0; //reset bit when enables
+		else if (tcnt == 7'd127) begin //when it reaches end of start bit 32us
+		  BIT <= BIT + 1'b1;   //increment bit count
+	
+		if(BIT==4'd8) begin   //when it reaches the last useful bit in a frame
+		  if(BYTE == 3'd5) //when it reaches the last useful bit in the last frame in a MSG
+                     BYTE <= 3'b0;   //reset the byte to 0
+		   else
+		       BYTE <= BYTE + 1'b1; //increment the byte otherwise
+		   end
+	       end
+	   end
+       end
+endmodule
+
